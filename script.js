@@ -367,10 +367,23 @@ function initializeMap() {
         zoomControl: true
     });
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
+    // Add base layer
+    L.tileLayer(MAP_LAYERS.base.url, {
+        attribution: MAP_LAYERS.base.attribution,
         maxZoom: 18
     }).addTo(map);
+
+    // Initialize layer controls
+    baseMaps = {
+        "Standard": L.tileLayer(MAP_LAYERS.base.url),
+        "Satellite": L.tileLayer(MAP_LAYERS.satellite.url)
+    };
+
+    // Add layer control
+    L.control.layers(baseMaps).addTo(map);
+    
+    // Add custom layer control
+    addCustomLayerControl();
 }
 
 function addCustomLayerControl() {
@@ -454,22 +467,70 @@ searchInput.addEventListener('keypress', (e) => {
 
 // Update the getCurrentLocation function
 function getCurrentLocation() {
-    if (navigator.geolocation) {
-        showNotification('Getting your location...', 'info');
-        navigator.geolocation.getCurrentPosition(
-            position => {
-                currentLat = position.coords.latitude;
-                currentLon = position.coords.longitude;
-                getWeatherByCoords(currentLat, currentLon, true);
-                showNotification('Location found!', 'success');
-            },
-            error => {
-                handleLocationError(error);
-            }
-        );
-    } else {
-        showNotification('Geolocation is not supported', 'error');
-    }
+    return new Promise((resolve, reject) => {
+        if (navigator.geolocation) {
+            showNotification('Getting your location...', 'info');
+            
+            navigator.geolocation.getCurrentPosition(
+                // Success callback
+                async position => {
+                    currentLat = position.coords.latitude;
+                    currentLon = position.coords.longitude;
+                    
+                    try {
+                        // Get weather data
+                        const response = await fetch(
+                            `${WEATHER_API_BASE}/weather?lat=${currentLat}&lon=${currentLon}&units=metric&appid=${API_KEY}`
+                        );
+                        
+                        if (!response.ok) throw new Error('Weather data not available');
+                        
+                        const data = await response.json();
+                        
+                        // Update UI with weather data
+                        displayWeather(data);
+                        updateMap(currentLat, currentLon, true);
+                        getForecast(currentLat, currentLon);
+                        getWeatherAlerts(currentLat, currentLon);
+                        
+                        showNotification('Location found!', 'success');
+                        resolve(data);
+                    } catch (error) {
+                        reject(error);
+                    }
+                },
+                // Error callback
+                error => {
+                    let errorMessage = 'Unable to get location: ';
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED:
+                            errorMessage += 'Permission denied';
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            errorMessage += 'Location unavailable';
+                            break;
+                        case error.TIMEOUT:
+                            errorMessage += 'Request timed out';
+                            break;
+                        default:
+                            errorMessage += 'Unknown error';
+                    }
+                    showNotification(errorMessage, 'error');
+                    reject(error);
+                },
+                // Options
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+            );
+        } else {
+            const error = 'Geolocation is not supported by your browser';
+            showNotification(error, 'error');
+            reject(new Error(error));
+        }
+    });
 }
 
 // Get weather by city name
@@ -1075,14 +1136,14 @@ function analyzeWeatherPatterns(dailyData) {
 // Initialize app with current location
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        // Initialize translations
-        initializeTranslations();
-        
-        // Initialize map
+        // Initialize map first
         initializeMap();
         
-        // Initialize saved locations
-        updateSavedLocations();
+        // Initialize translations
+        updateLanguage(currentLanguage);
+        
+        // Get current location immediately
+        await getCurrentLocation();
         
         // Add event listeners
         searchButton.addEventListener('click', handleSearch);
@@ -1090,15 +1151,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (e.key === 'Enter') handleSearch();
         });
         locationButton.addEventListener('click', getCurrentLocation);
-        languageSelect.addEventListener('change', (e) => updateLanguage(e.target.value));
         
-        // Initialize tabs
-        tabButtons.forEach(button => {
-            button.addEventListener('click', () => switchTab(button.dataset.tab));
-        });
-        
-        // Get initial location
-        await getCurrentLocation();
+        // Initialize saved locations
+        updateSavedLocations();
         
     } catch (error) {
         console.error('Initialization error:', error);
