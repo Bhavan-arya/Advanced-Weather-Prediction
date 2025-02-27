@@ -1,4 +1,4 @@
-const API_KEY = 'b9375700a5cb3b658cfc863f4f2557c4';
+const API_KEY = 'db8c10bc05814fbf64a46c2f4313df23';
 const WEATHER_API_BASE = 'https://api.openweathermap.org/data/2.5';
 const HOURLY_API_BASE = 'https://pro.openweathermap.org/data/2.5';
 
@@ -286,9 +286,15 @@ function showNotification(message, type) {
     notificationElement.style.color = 'white';
     notificationElement.classList.remove('hidden');
     
-    setTimeout(() => {
+    // Clear previous timeout if exists
+    if (window.notificationTimeout) {
+        clearTimeout(window.notificationTimeout);
+    }
+    
+    // Set new timeout
+    window.notificationTimeout = setTimeout(() => {
         notificationElement.classList.add('hidden');
-    }, 3000);
+    }, 5000); // Show for 5 seconds
 }
 
 // Time zone handling
@@ -314,18 +320,120 @@ function formatLocalDate(timestamp, timezone) {
 // Add these constants at the top of your file
 const RADAR_TILE_URL = 'https://tile.openweathermap.org/map/{layer}/{z}/{x}/{y}.png?appid=' + API_KEY;
 const MAP_LAYERS = {
-    clouds: { name: 'Clouds', code: 'clouds_new' },
-    precipitation: { name: 'Precipitation', code: 'precipitation_new' },
-    temperature: { name: 'Temperature', code: 'temp_new' },
-    wind: { name: 'Wind', code: 'wind_new' },
-    pressure: { name: 'Pressure', code: 'pressure_new' }
+    base: {
+        name: 'Standard Map',
+        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        attribution: '© OpenStreetMap contributors'
+    },
+    satellite: {
+        name: 'Satellite',
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attribution: '© Esri'
+    },
+    precipitation: {
+        name: 'Precipitation',
+        url: WEATHER_TILE_URL.replace('{layer}', 'precipitation_new')
+    },
+    clouds: {
+        name: 'Clouds',
+        url: WEATHER_TILE_URL.replace('{layer}', 'clouds_new')
+    },
+    temp: {
+        name: 'Temperature',
+        url: WEATHER_TILE_URL.replace('{layer}', 'temp_new')
+    },
+    wind: {
+        name: 'Wind Speed',
+        url: WEATHER_TILE_URL.replace('{layer}', 'wind_new')
+    },
+    pressure: {
+        name: 'Pressure',
+        url: WEATHER_TILE_URL.replace('{layer}', 'pressure_new')
+    }
 };
 
-// Initialize map
-const map = L.map('map').setView([0, 0], 2);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
-}).addTo(map);
+// Initialize map variables
+let map;
+let currentWeatherLayer = null;
+let baseMaps = {};
+let overlayMaps = {};
+
+function initializeMap() {
+    if (map) map.remove();
+    
+    map = L.map('map', {
+        center: [0, 0],
+        zoom: 2,
+        zoomControl: true
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 18
+    }).addTo(map);
+}
+
+function addCustomLayerControl() {
+    const layerControl = L.control({ position: 'topright' });
+
+    layerControl.onAdd = function() {
+        const container = L.DomUtil.create('div', 'custom-layer-control');
+        container.innerHTML = `
+            <div class="layer-selector">
+                <select id="layer-select">
+                    <option value="">Select Layer</option>
+                    <option value="precipitation">Precipitation</option>
+                    <option value="clouds">Clouds</option>
+                    <option value="temp">Temperature</option>
+                    <option value="wind">Wind Speed</option>
+                    <option value="pressure">Pressure</option>
+                </select>
+                <div class="layer-opacity">
+                    <label>Opacity:</label>
+                    <input type="range" id="opacity-slider" min="0" max="100" value="50">
+                </div>
+            </div>
+        `;
+
+        setTimeout(() => {
+            const select = container.querySelector('#layer-select');
+            const slider = container.querySelector('#opacity-slider');
+
+            select.addEventListener('change', (e) => {
+                updateWeatherLayer(e.target.value);
+            });
+
+            slider.addEventListener('input', (e) => {
+                updateLayerOpacity(e.target.value / 100);
+            });
+        }, 0);
+
+        return container;
+    };
+
+    layerControl.addTo(map);
+}
+
+function updateWeatherLayer(layerKey) {
+    if (currentWeatherLayer) {
+        map.removeLayer(currentWeatherLayer);
+    }
+    
+    if (layerKey && MAP_LAYERS[layerKey]) {
+        currentWeatherLayer = L.tileLayer(MAP_LAYERS[layerKey].url, {
+            attribution: MAP_LAYERS[layerKey].attribution || '© OpenWeatherMap',
+            opacity: 0.5
+        }).addTo(map);
+    }
+}
+
+function updateLayerOpacity(opacity) {
+    if (currentWeatherLayer) {
+        currentWeatherLayer.setOpacity(opacity);
+    }
+}
+
+// Add these styles to your CSS
 
 // Add these variables at the top of your script
 let currentLat = null;
@@ -337,10 +445,6 @@ let tempChart = null;
 let humidityChart = null;
 let windChart = null;
 
-// Initialize map layers
-let currentWeatherLayer = null;
-const weatherLayers = {};
-
 // Event Listeners
 searchButton.addEventListener('click', () => getWeather(searchInput.value));
 locationButton.addEventListener('click', getCurrentLocation);
@@ -351,81 +455,46 @@ searchInput.addEventListener('keypress', (e) => {
 // Update the getCurrentLocation function
 function getCurrentLocation() {
     if (navigator.geolocation) {
-        // Show loading notification
         showNotification('Getting your location...', 'info');
-        
         navigator.geolocation.getCurrentPosition(
-            // Success callback
             position => {
                 currentLat = position.coords.latitude;
                 currentLon = position.coords.longitude;
-                
-                // Get weather for current location
                 getWeatherByCoords(currentLat, currentLon, true);
                 showNotification('Location found!', 'success');
             },
-            // Error callback
             error => {
-                console.error('Geolocation error:', error);
-                let errorMessage = 'Unable to get your location: ';
-                switch(error.code) {
-                    case error.PERMISSION_DENIED:
-                        errorMessage += 'Location permission denied. Please enable location access.';
-                        break;
-                    case error.POSITION_UNAVAILABLE:
-                        errorMessage += 'Location information unavailable.';
-                        break;
-                    case error.TIMEOUT:
-                        errorMessage += 'Location request timed out.';
-                        break;
-                    default:
-                        errorMessage += 'An unknown error occurred.';
-                }
-                showNotification(errorMessage, 'error');
-                
-                // If location access fails, center map at a default location
-                map.setView([0, 0], 2);
-            },
-            // Options
-            {
-                enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 0
+                handleLocationError(error);
             }
         );
     } else {
-        showNotification('Geolocation is not supported by your browser', 'error');
-        // Center map at a default location if geolocation is not supported
-        map.setView([0, 0], 2);
+        showNotification('Geolocation is not supported', 'error');
     }
 }
 
 // Get weather by city name
 async function getWeather(city) {
-    if (!city) return;
-
     try {
-        console.log('Fetching weather for:', city);
+        showNotification('Fetching weather data...', 'info');
+        
         const response = await fetch(
             `${WEATHER_API_BASE}/weather?q=${city}&units=metric&appid=${API_KEY}`
         );
 
-        console.log('Response status:', response.status);
         if (!response.ok) throw new Error('City not found');
 
         const data = await response.json();
-        console.log('Weather data:', data);
-        
         displayWeather(data);
-        updateMap(data.coord.lat, data.coord.lon, false);
+        updateMap(data.coord.lat, data.coord.lon);
         getForecast(data.coord.lat, data.coord.lon);
-        getWeatherAlerts(data.coord.lat, data.coord.lon);
-        
         saveLocation(data.name, data.sys.country);
         
+        showNotification('Weather updated', 'success');
+        return data;
     } catch (error) {
-        console.error('Error:', error);
-        showNotification(error.message, 'error');
+        console.error('Weather error:', error);
+        showNotification('City not found or error fetching data', 'error');
+        throw error;
     }
 }
 
@@ -436,21 +505,36 @@ async function getWeatherByCoords(lat, lon, isCurrentLocation = false) {
             `${WEATHER_API_BASE}/weather?lat=${lat}&lon=${lon}&units=metric&appid=${API_KEY}`
         );
 
-        if (!response.ok) throw new Error('Weather data not available');
+        if (!response.ok) {
+            throw new Error(`Weather data not available (${response.status})`);
+        }
 
         const data = await response.json();
+        
+        // Check if we got valid data
+        if (!data || !data.main) {
+            throw new Error('Invalid weather data received');
+        }
+
         displayWeather(data);
         updateMap(lat, lon, isCurrentLocation);
-        getForecast(lat, lon);
+        await getForecast(lat, lon);
+        await getWeatherAlerts(lat, lon);
 
-        // Save to recent locations if it's not current location
         if (!isCurrentLocation) {
             saveLocation(data.name, data.sys.country);
         }
 
+        // Show weather info and hide error
+        weatherInfo.classList.remove('hidden');
+        errorMessage.classList.add('hidden');
+
     } catch (error) {
         console.error('Weather error:', error);
-        showNotification('Unable to fetch weather data', 'error');
+        weatherInfo.classList.add('hidden');
+        errorMessage.classList.remove('hidden');
+        errorMessage.textContent = `Error: ${error.message}`;
+        throw error; // Re-throw to handle in calling function
     }
 }
 
@@ -794,9 +878,15 @@ function showNotification(message, type = 'info') {
     notificationElement.style.color = 'white';
     notificationElement.classList.remove('hidden');
     
-    setTimeout(() => {
+    // Clear previous timeout if exists
+    if (window.notificationTimeout) {
+        clearTimeout(window.notificationTimeout);
+    }
+    
+    // Set new timeout
+    window.notificationTimeout = setTimeout(() => {
         notificationElement.classList.add('hidden');
-    }, 3000);
+    }, 5000); // Show for 5 seconds
 }
 
 // Add this function to create charts from forecast data
@@ -983,60 +1073,78 @@ function analyzeWeatherPatterns(dailyData) {
 }
 
 // Initialize app with current location
-document.addEventListener('DOMContentLoaded', () => {
-    // Initialize saved locations
-    updateSavedLocations();
-    
-    // Immediately request current location when app loads
-    if (navigator.geolocation) {
-        // Show loading notification
-        showNotification('Getting your location...', 'info');
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        // Initialize translations
+        initializeTranslations();
         
-        navigator.geolocation.getCurrentPosition(
-            // Success callback
-            position => {
-                currentLat = position.coords.latitude;
-                currentLon = position.coords.longitude;
-                
-                // Get weather for current location
-                getWeatherByCoords(currentLat, currentLon, true);
-                showNotification('Location found!', 'success');
-            },
-            // Error callback
-            error => {
-                console.error('Geolocation error:', error);
-                let errorMessage = 'Unable to get your location: ';
-                switch(error.code) {
-                    case error.PERMISSION_DENIED:
-                        errorMessage += 'Location permission denied. Please enable location access.';
-                        break;
-                    case error.POSITION_UNAVAILABLE:
-                        errorMessage += 'Location information unavailable.';
-                        break;
-                    case error.TIMEOUT:
-                        errorMessage += 'Location request timed out.';
-                        break;
-                    default:
-                        errorMessage += 'An unknown error occurred.';
-                }
-                showNotification(errorMessage, 'error');
-                
-                // If location access fails, center map at a default location
-                map.setView([0, 0], 2);
-            },
-            // Options
-            {
-                enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 0
-            }
-        );
-    } else {
-        showNotification('Geolocation is not supported by your browser', 'error');
-        // Center map at a default location if geolocation is not supported
-        map.setView([0, 0], 2);
+        // Initialize map
+        initializeMap();
+        
+        // Initialize saved locations
+        updateSavedLocations();
+        
+        // Add event listeners
+        searchButton.addEventListener('click', handleSearch);
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleSearch();
+        });
+        locationButton.addEventListener('click', getCurrentLocation);
+        languageSelect.addEventListener('change', (e) => updateLanguage(e.target.value));
+        
+        // Initialize tabs
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => switchTab(button.dataset.tab));
+        });
+        
+        // Get initial location
+        await getCurrentLocation();
+        
+    } catch (error) {
+        console.error('Initialization error:', error);
+        showNotification('Error initializing the app', 'error');
     }
 });
+
+// Handle search
+async function handleSearch() {
+    const city = searchInput.value.trim();
+    if (city) {
+        showNotification('Searching...', 'info');
+        try {
+            const response = await fetch(
+                `${WEATHER_API_BASE}/weather?q=${city}&units=metric&appid=${API_KEY}`
+            );
+            
+            if (!response.ok) throw new Error('City not found');
+            
+            const data = await response.json();
+            getWeatherByCoords(data.coord.lat, data.coord.lon);
+            showNotification('Weather updated', 'success');
+        } catch (error) {
+            showNotification('City not found', 'error');
+        }
+    }
+}
+
+// Handle location errors
+function handleLocationError(error) {
+    let message = 'Unable to get location: ';
+    switch(error.code) {
+        case error.PERMISSION_DENIED:
+            message += 'Permission denied';
+            break;
+        case error.POSITION_UNAVAILABLE:
+            message += 'Location unavailable';
+            break;
+        case error.TIMEOUT:
+            message += 'Request timed out';
+            break;
+        default:
+            message += 'Unknown error';
+    }
+    showNotification(message, 'error');
+}
 
 // Utility function to get most frequent item in array
 function getMostFrequent(arr) {
@@ -1258,4 +1366,53 @@ getWeather = async function(city) {
         await weatherPredictor.predictWeather();
     }
 };
+
+// Add this function to initialize the app
+async function initializeApp() {
+    try {
+        // Show loading state
+        weatherInfo.classList.add('hidden');
+        showNotification('Getting your location...', 'info');
+
+        // Initialize the map first
+        initializeMap();
+
+        // Check for geolocation support
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                // Success callback
+                async position => {
+                    currentLat = position.coords.latitude;
+                    currentLon = position.coords.longitude;
+                    
+                    try {
+                        await getWeatherByCoords(currentLat, currentLon, true);
+                        showNotification('Weather updated for your location', 'success');
+                    } catch (error) {
+                        console.error('Weather fetch error:', error);
+                        showNotification('Error fetching weather data. Please try searching for a city.', 'error');
+                    }
+                },
+                // Error callback
+                error => {
+                    console.error('Geolocation error:', error);
+                    showNotification('Please search for a city to see weather information', 'info');
+                    map.setView([0, 0], 2);
+                },
+                // Options
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+            );
+        } else {
+            showNotification('Location access not available. Please search for a city.', 'info');
+            map.setView([0, 0], 2);
+        }
+    } catch (error) {
+        console.error('Initialization error:', error);
+        showNotification('Error initializing the app. Please try refreshing.', 'error');
+    }
+}
 
