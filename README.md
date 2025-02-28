@@ -60,7 +60,8 @@ npm start
 - View current weather and forecasts
 - Save locations for quick access
 6. Outputs.
-![image](https://github.com/user-attachments/assets/87ab56b7-792b-4a00-9551-041177b7e772)
+![image](https://github.com/user-attachments/assets/1d3a80bc-ad66-4ed4-948b-2196fc03fb72)
+
 
 ![image](https://github.com/user-attachments/assets/db6125c2-9256-45c3-bcfa-d206d040d442)
 
