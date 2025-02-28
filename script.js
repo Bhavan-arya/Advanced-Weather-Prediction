@@ -1,4 +1,4 @@
-const API_KEY = 'b9375700a5cb3b658cfc863f4f2557c4';
+const API_KEY = 'Your API KEY';
 const WEATHER_API_BASE = 'https://api.openweathermap.org/data/2.5';
 const HOURLY_API_BASE = 'https://pro.openweathermap.org/data/2.5';
 
